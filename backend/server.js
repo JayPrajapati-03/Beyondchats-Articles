@@ -13,7 +13,8 @@ const app = express();
 /* ✅ ENABLE CORS */
 app.use(
   cors({
-    origin: "http://localhost:5173", // frontend origin
+    origin: "http://localhost:5173",
+    "https://beyondchats-articles.vercel.app", // frontend origin
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true
   })
