@@ -1,28 +1,26 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
+require("dotenv").config();
+require("../src/config/db")();
 
-const API_URL = "http://localhost:5000/api/articles";
+const { API_BASE_URL } = require("../src/config/constants");
+const API_URL = `${API_BASE_URL}/api/articles`;
 const BLOG_URL = "https://beyondchats.com/blogs/";
 
 async function scrapeBeyondChats() {
   try {
-    // 1. Fetch blog listing page
     const { data } = await axios.get(BLOG_URL);
     const $ = cheerio.load(data);
-
     const articleLinks = [];
 
-    // 2. Collect ONLY real blog article links
-    $("a").each((_, element) => {
-      const link = $(element).attr("href");
-
+    $("a").each((_, el) => {
+      const link = $(el).attr("href");
       if (
         link &&
         link.includes("/blogs/") &&
         !link.includes("/tag/") &&
         !link.includes("/category/") &&
-        !link.endsWith("/blogs/") &&
-        !articleLinks.includes(link)
+        !link.endsWith("/blogs/")
       ) {
         articleLinks.push(
           link.startsWith("http")
@@ -32,24 +30,18 @@ async function scrapeBeyondChats() {
       }
     });
 
-    // 3. Take first 5 valid articles
-    const selectedArticles = articleLinks.slice(0, 5);
+    const selectedArticles = [...new Set(articleLinks)].slice(0, 5);
 
     for (const url of selectedArticles) {
       try {
-        const articleRes = await axios.get(url);
-        const articlePage = cheerio.load(articleRes.data);
+        const page = await axios.get(url);
+        const $page = cheerio.load(page.data);
 
-        const title = articlePage("h1").first().text().trim();
-        const content = articlePage("main").text().trim();
+        const title = $page("h1").first().text().trim();
+        const content = $page("main").text().trim();
 
-        // Quality check
-        if (!title || content.length < 300) {
-          console.log(`Skipping (insufficient content): ${url}`);
-          continue;
-        }
+        if (!title || content.length < 300) continue;
 
-        // 4. Save via API (NOT directly to DB)
         await axios.post(API_URL, {
           title,
           content,
@@ -58,13 +50,13 @@ async function scrapeBeyondChats() {
 
         console.log(`Saved: ${title}`);
       } catch (err) {
-        console.error(`Failed to scrape article: ${url}`);
+        console.error("Scrape failed:", url);
       }
     }
-
-    console.log("Scraping completed");
-  } catch (error) {
-    console.error("Scraping error:", error.message);
+  } catch (err) {
+    console.error("Scraping error:", err.message);
+  } finally {
+    process.exit(0);
   }
 }
 

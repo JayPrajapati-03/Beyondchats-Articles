@@ -1,78 +1,58 @@
 const axios = require("axios");
 const ArticleVersion = require("../src/models/ArticleVersion");
 const Reference = require("../src/models/Reference");
+const Metadata = require("../src/models/Metadata");
 const { generateAIContent } = require("../src/services/aiService");
 require("dotenv").config();
 require("../src/config/db")();
 
-const API_URL = "http://localhost:5000/api/articles";
+const { API_BASE_URL } = require("../src/config/constants");
+const API_URL = `${API_BASE_URL}/api/articles`;
 
 async function enhanceArticlesAI() {
   try {
-    // 1. Fetch all articles
     const { data: articles } = await axios.get(API_URL);
 
     for (const article of articles) {
-      // Skip test/sample data
-      if (article.title.toLowerCase().includes("sample")) continue;
-
-      console.log(`Enhancing article: ${article.title}`);
-
-      // 2. Idempotency check
       const exists = await ArticleVersion.findOne({
         articleId: article._id
       });
+      if (exists) continue;
 
-      if (exists) {
-        console.log("AI version already exists, skipping");
-        console.log("----------");
-        continue;
-      }
+      const refs = await Reference.find({ articleId: article._id });
+      const refText = refs.map(r => r.referenceUrl).join("\n");
 
-      // 3. Fetch references
-      const references = await Reference.find({
-        articleId: article._id
-      });
-
-      const referenceText = references
-        .map((r, i) => `Reference ${i + 1}: ${r.referenceUrl}`)
-        .join("\n");
-
-      // 4. Build AI prompt
       const prompt = `
-Rewrite the following article in a professional, SEO-friendly manner.
-Improve structure, clarity, and readability.
-Use references only for inspiration. Do NOT copy text.
+Rewrite the article professionally and SEO-friendly.
+Do not copy. Use references only for inspiration.
 
 ARTICLE:
 ${article.content}
 
 REFERENCES:
-${referenceText}
+${refText}
 `;
 
-      // 5. Generate AI content via service
-      const improvedContent = await generateAIContent(prompt);
+      const updatedContent = await generateAIContent(prompt);
+      if (!updatedContent) continue;
 
-      if (!improvedContent) {
-        console.log("AI returned empty response, skipping");
-        console.log("----------");
-        continue;
-      }
-
-      // 6. Save AI-enhanced content
       await ArticleVersion.create({
         articleId: article._id,
-        updatedContent: improvedContent
+        updatedContent
       });
 
-      console.log("AI-enhanced article saved");
-      console.log("----------");
-    }
+      await Metadata.create({
+        articleId: article._id,
+        aiModelUsed: "llama3",
+        keywords: article.title.split(" ").slice(0, 5)
+      });
 
-    console.log("AI enhancement completed");
-  } catch (error) {
-    console.error("AI enhancement error:", error.message);
+      console.log("AI enhanced:", article.title);
+    }
+  } catch (err) {
+    console.error("AI error:", err.message);
+  } finally {
+    process.exit(0);
   }
 }
 
