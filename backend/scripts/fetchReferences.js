@@ -3,8 +3,7 @@ const Reference = require("../src/models/Reference");
 require("dotenv").config();
 require("../src/config/db")();
 
-const { API_BASE_URL } = require("../src/config/constants");
-const API_URL = `${API_BASE_URL}/api/articles`;
+const API_URL = "http://localhost:5000/api/articles";
 const SERP_API_KEY = process.env.SERP_API_KEY;
 
 async function fetchReferences() {
@@ -12,10 +11,20 @@ async function fetchReferences() {
     const { data: articles } = await axios.get(API_URL);
 
     for (const article of articles) {
-      const existing = await Reference.find({ articleId: article._id });
-      if (existing.length >= 2) continue;
+      if (article.title.toLowerCase().includes("sample")) continue;
 
-      const search = await axios.get("https://serpapi.com/search.json", {
+      console.log(`Searching references for: ${article.title}`);
+
+      // ✅ SKIP if references already exist
+      const existingRefs = await Reference.find({ articleId: article._id });
+      if (existingRefs.length >= 2) {
+        console.log("References already exist, skipping");
+        console.log("----------");
+        continue;
+      }
+
+      // 🔍 Search using SerpAPI
+      const searchRes = await axios.get("https://serpapi.com/search.json", {
         params: {
           q: article.title,
           engine: "google",
@@ -23,27 +32,45 @@ async function fetchReferences() {
         }
       });
 
-      const results = search.data.organic_results || [];
-      let count = 0;
+      const results = searchRes.data.organic_results || [];
+      let savedCount = 0;
 
-      for (const r of results) {
+      for (const result of results) {
         if (
-          r.link &&
-          !r.link.includes("beyondchats.com") &&
-          count < 2
+          result.link &&
+          result.link.startsWith("http") &&
+          !result.link.includes("beyondchats.com")
         ) {
-          await Reference.create({
+          const exists = await Reference.findOne({
             articleId: article._id,
-            referenceUrl: r.link
+            referenceUrl: result.link
           });
-          count++;
+
+          if (!exists && savedCount < 2) {
+            await Reference.create({
+              articleId: article._id,
+              referenceUrl: result.link
+            });
+
+            console.log(`Saved reference: ${result.link}`);
+            savedCount++;
+          }
         }
       }
+
+      if (savedCount === 0) {
+        console.log("No valid references found");
+      }
+
+      console.log("----------");
     }
-  } catch (err) {
-    console.error("Reference error:", err.message);
-  } finally {
-    process.exit(0);
+
+    console.log("Reference fetching completed");
+  } catch (error) {
+    console.error(
+      "Automation error:",
+      error.response?.data || error.message
+    );
   }
 }
 
